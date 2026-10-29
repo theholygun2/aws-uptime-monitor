@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Service Status</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1b1f24;
+      --muted: #637083;
+      --border: #e1e5ea;
+      --ok: #1a8f4c;
+      --warn: #c77d00;
+      --bad: #d13438;
+      --ok-bg: #e6f5ec;
+      --warn-bg: #fdf1dc;
+      --bad-bg: #fbe7e8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1216;
+        --card: #181c22;
+        --text: #e8ebef;
+        --muted: #8a95a5;
+        --border: #272d36;
+        --ok: #3ccf7a;
+        --warn: #f0b04a;
+        --bad: #ff6b70;
+        --ok-bg: #12301f;
+        --warn-bg: #36290f;
+        --bad-bg: #3a1618;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 16px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin: 0 0 20px; }
+
+    .banner {
+      padding: 16px 20px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 1.1rem;
+      border: 1px solid var(--border);
+      background: var(--card);
+    }
+    .banner.operational { background: var(--ok-bg);   color: var(--ok);   border-color: var(--ok); }
+    .banner.partial     { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+    .banner.major       { background: var(--bad-bg);  color: var(--bad);  border-color: var(--bad); }
+    .banner.loading     { color: var(--muted); font-weight: 500; }
+
+    .stale {
+      margin-top: 12px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      background: var(--warn-bg);
+      color: var(--warn);
+      font-size: 0.9rem;
+    }
+    .stale[hidden] { display: none; }
+
+    .targets { display: grid; gap: 12px; margin-top: 20px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .name { font-weight: 600; font-size: 1.05rem; }
+    .pill {
+      padding: 2px 12px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .pill.up   { background: var(--ok-bg);  color: var(--ok); }
+    .pill.down { background: var(--bad-bg); color: var(--bad); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .stat .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat .value { font-size: 1.1rem; font-weight: 600; }
+    .error { margin-top: 10px; font-size: 0.85rem; color: var(--bad); }
+
+    footer { margin-top: 24px; font-size: 0.85rem; color: var(--muted); text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Service Status</h1>
+    <div id="banner" class="banner loading">Loading status…</div>
+    <div id="stale" class="stale" hidden>
+      This data looks out of date. The monitor itself may be having problems.
+    </div>
+    <div id="targets" class="targets"></div>
+    <footer id="footer"></footer>
+  </main>
+
+  <script>
+    var REFRESH_MS = 30000;
+    var STALE_AFTER_SECONDS = 180;
+
+    function el(tag, className, text) {
+      var node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null) node.textContent = text;
+      return node;
+    }
+
+    function fmtMs(value) {
+      if (value === null || value === undefined) return "n/a";
+      return Math.round(value) + " ms";
+    }
+
+    function fmtPct(value) {
+      if (value === null || value === undefined) return "n/a";
+      return value.toFixed(2) + "%";
+    }
+
+    function stat(label, value) {
+      var box = el("div", "stat");
+      box.appendChild(el("div", "label", label));
+      box.appendChild(el("div", "value", value));
+      return box;
+    }
+
+    function renderTarget(t) {
+      var card = el("div", "card");
+
+      var row = el("div", "row");
+      row.appendChild(el("span", "name", t.name));
+      row.appendChild(el("span", "pill " + t.status, t.status === "up" ? "Operational" : "Down"));
+      card.appendChild(row);
+
+      var stats = el("div", "stats");
+      stats.appendChild(stat("Availability", fmtPct(t.availability_pct)));
+      stats.appendChild(stat("Avg response", fmtMs(t.avg_response_ms)));
+      stats.appendChild(stat("p95 response", fmtMs(t.p95_response_ms)));
+      card.appendChild(stats);
+
+      if (t.status === "down" && t.last_error) {
+        card.appendChild(el("div", "error", "Last error: " + t.last_error));
+      }
+      return card;
+    }
+
+    var BANNERS = {
+      operational:   { cls: "operational", text: "All systems operational" },
+      partial_outage: { cls: "partial",     text: "Partial outage" },
+      major_outage:   { cls: "major",       text: "Major outage" }
+    };
+
+    function render(data) {
+      var banner = document.getElementById("banner");
+      var info = BANNERS[data.overall] || { cls: "loading", text: "Status unknown" };
+      banner.className = "banner " + info.cls;
+      banner.textContent = info.text;
+
+      var container = document.getElementById("targets");
+      container.replaceChildren();
+      data.targets.forEach(function (t) { container.appendChild(renderTarget(t)); });
+
+      var generated = new Date(data.generated_at);
+      var ageSeconds = (Date.now() - generated.getTime()) / 1000;
+      document.getElementById("stale").hidden = ageSeconds <= STALE_AFTER_SECONDS;
+
+      document.getElementById("footer").textContent =
+        "Last checked " + generated.toLocaleString() +
+        " · availability over the last " + data.window_hours + " hours";
+    }
+
+    function showError() {
+      var banner = document.getElementById("banner");
+      banner.className = "banner loading";
+      banner.textContent = "Could not load status data. Retrying…";
+    }
+
+    function load() {
+      fetch("status.json", { cache: "no-store" })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(render)
+        .catch(showError);
+    }
+
+    load();
+    setInterval(load, REFRESH_MS);
+  </script>
+</body>
+</html>
